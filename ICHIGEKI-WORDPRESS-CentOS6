@@ -1,0 +1,225 @@
+#!/bin/bash
+# @sacloud-once
+
+DBNAME=wordpress
+DBUSER=wpuser
+ETH0=$(ip a show eth0 | grep inet | grep -v inet6 | awk '{print $2}' | sed -e "s/\/[0-9]*//")
+HOME=/root
+export HOME
+USER=root
+export USER
+################################################################################
+# Section1 yum update
+
+yum -y update
+################################################################################
+
+################################################################################
+# Section2 fail2ban configure and IPTABLES Setting
+
+##--@--## fail2ban のメール宛先と送信元を変更する
+cp -p /etc/fail2ban/jail.conf /etc/fail2ban/jail.conf.orig
+sed -i 's/you@example.com/root@localhost/g;s/fail2ban@example.com/fail2ban@localhost/g' /etc/fail2ban/jail.conf
+
+##--@--## iptables設定
+# 初期化のため一旦iptablesを停止する
+service iptables stop
+# 受信はすべて破棄する
+iptables -P INPUT DROP
+# 送信はすべて許可する
+iptables -P OUTPUT ACCEPT
+# パケット転送はすべて破棄する
+iptables -P FORWARD DROP
+# localhostからのアクセスをすべて許可
+iptables -A INPUT -i lo -j ACCEPT
+# 内部から行ったアクセスに対する外部からの返答アクセスを許可
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+# 外部からのTCP22番ポート(SSH)へのアクセスを許可
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+# 外部からのTCP80番ポート(HTTP)へのアクセスを許可
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+# 設定を保存
+service iptables save
+# iptablesを起動
+service iptables start
+# iptablesをスタートアップ登録する
+chkconfig iptables on
+################################################################################
+
+################################################################################
+# Section3 Package install
+
+# NGINX
+# リポジトリをインストール
+yum -y install http://nginx.org/packages/centos/6/noarch/RPMS/nginx-release-centos-6-0.el6.ngx.noarch.rpm
+# mainlineに向き先変更
+cp -p /etc/yum.repos.d/nginx.repo /etc/yum.repos.d/nginx.repo.orig
+sed -i 's/centos/mainline\/centos/' /etc/yum.repos.d/nginx.repo
+# install
+yum -y install nginx
+
+# PHP
+yum -y install http://rpms.famillecollet.com/enterprise/remi-release-6.rpm
+#rpm -ivh http://rpms.famillecollet.com/enterprise/remi-release-6.rpm
+yum --enablerepo=remi-php56 -y install \
+php-cli php-common php-mbstring php-pdo php-xml php-mysqlnd \
+php-pecl-apcu php-xmlrpc php-opcache php-fpm
+
+# MySQL
+yum -y install mysql-server
+################################################################################
+
+################################################################################
+# Section4 MySQL Configuration
+PARAMFILE=${HOME}/.mysql/MySQLPARAM
+mkdir ${HOME}/.mysql
+chkconfig mysqld on
+service mysqld start
+
+# MySQLのrootユーザとパスワードを作成し、パラメーターファイルに格納する。
+# 書式は user root <Password>
+echo "user root $(cat /dev/urandom | tr -dc '[:alnum:]' | head -c 8)" > ${PARAMFILE}
+
+# WordPressのDBに関してパラメーターファイルに格納する。
+# 書式は DBPARAM DB名 DBユーザー名 <Password>
+echo "DBPARAM ${DBNAME} ${DBUSER} $(cat /dev/urandom | tr -dc '[:alnum:]' | head -c 8)" >> ${PARAMFILE}
+
+# MySQLのrootユーザーのパスワードを設定する。
+mysqladmin -u root password "$(grep ^user ${PARAMFILE} | awk '{print $NF}')"
+
+# WordPressのデータベースを作成する。
+mysql -u root -p$(grep ^user ${PARAMFILE} | awk '{print $NF}') \
+-e "create database ${DBNAME} character set utf8;"
+
+# DBユーザー(WordPressデータベース接続用)のパスワードを変数PWに格納する。
+PW=$(grep ^DBPARAM ${PARAMFILE} | awk '{print $NF}')
+
+# DBユーザーを作成する。
+mysql -u root -p$(grep ^user ${PARAMFILE} | awk '{print $NF}') \
+-e "GRANT ALL PRIVILEGES on ${DBNAME}.* to ${DBUSER}@localhost identified by \"${PW}\";"
+
+# mysql_secure_installation
+# 匿名ユーザーの削除
+mysql -u root -p$(grep ^user ${PARAMFILE} | awk '{print $NF}') \
+-e "DELETE FROM mysql.user WHERE User='';"
+
+# localhost以外からのrootログイン禁止
+mysql -u root -p$(grep ^user ${PARAMFILE} | awk '{print $NF}') \
+-e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+
+# testデータベース削除
+mysql -u root -p$(grep ^user ${PARAMFILE} | awk '{print $NF}') \
+-e "DROP DATABASE test;"
+
+# 権限情報の再読込
+mysql -u root -p$(grep ^user ${PARAMFILE} | awk '{print $NF}') \
+-e "FLUSH PRIVILEGES;"
+################################################################################
+
+################################################################################
+# Section5 PHP Configuration
+
+# php.ini Configuration
+cd /etc
+cp -p php.ini php.ini.orig
+sed -i 's/\;date.timezone\ \=/\;##--@--##date.timezone\ \=\ndate.timezone\ \=\ Asia\/Tokyo/' php.ini
+
+# PHP-FPM Configuration
+cd /etc/php-fpm.d
+cp -p www.conf www.conf.orig
+sed -i 's/^user\ \= apache/\;user\ \= apache\nuser\ \=\ nginx/' www.conf
+sed -i 's/^group\ \= apache/\;group\ \= apache\ngroup\ \=\ nginx/' www.conf
+
+service php-fpm start
+chkconfig php-fpm on
+################################################################################
+
+################################################################################
+# Section6 WordPress Install
+
+# Create DocumentRoot
+mkdir -p /var/www/${ETH0}
+
+cd ${HOME}
+mkdir bin
+cd bin
+wget https://raw.githubusercontent.com/nullpopopo/wpdl/master/bin/wpdl
+
+chmod 700 wpdl
+cd ${HOME}
+bin/wpdl
+
+cd ${HOME}/src/wordpress/current/
+tar xzf latest-ja.tar.gz
+cd wordpress/
+cp -pr * /var/www/${ETH0}
+
+cd /var/www/${ETH0}
+cp -p wp-config-sample.php wp-config.php
+chmod 660 wp-config.php
+sed -i s/database_name_here/$(grep ^DBPARAM ${PARAMFILE} | awk '{print $2}')/g wp-config.php
+sed -i s/username_here/$(grep ^DBPARAM ${PARAMFILE} | awk '{print $3}')/g wp-config.php
+sed -i s/password_here/$(grep ^DBPARAM ${PARAMFILE} | awk '{print $4}')/g wp-config.php
+sed -i s/'put your unique phrase here'/$(cat /dev/urandom | tr -dc '[:alnum:]'| head -c 32)/g wp-config.php
+
+cd /var/www/
+chown -R nginx:${USER} ${ETH0}
+chmod -R g+w ${ETH0}
+
+################################################################################
+
+################################################################################
+# Section7 NGINX Configuration
+
+# http://wpdocs.sourceforge.jp/Nginx
+cd /etc/nginx/
+cp -p nginx.conf nginx.conf.orig
+
+# worker_processesの数をコア数に合わせる
+sed -i "s/worker_processes[[:space:]]\+[0-9]\+/worker_processes $(cat /proc/cpuinfo | grep processor | wc -l)/g" nginx.conf
+
+cd conf.d
+
+# Per Site Configuration
+cat << _EOL_ > 000_VHOST.conf
+server {
+    server_name ${ETH0};
+    root /var/www/${ETH0};
+
+    # This order might seem weird - this is attempted to match last if rules below fail.
+    # http://wiki.nginx.org/HttpCoreModule
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+        index  index.php index.html index.htm;
+    }
+
+    # Add trailing slash to */wp-admin requests.
+    rewrite /wp-admin\$ \$scheme://\$host\$uri/ permanent;
+
+    # Directives to send expires headers and turn off 404 error logging.
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+        expires 24h;
+        log_not_found off;
+    }
+
+    # Pass all .php files onto a php-fpm/php-fcgi server.
+        location ~ \.php\$ {
+        try_files \$uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)\$;
+        include fastcgi_params;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_pass 127.0.0.1:9000;
+    }
+}
+_EOL_
+
+service nginx start
+chkconfig nginx on
+################################################################################
+
+################################################################################
+# Section8 Reboot
+
+reboot
+################################################################################
