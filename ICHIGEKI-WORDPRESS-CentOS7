@@ -1,0 +1,270 @@
+#!/bin/bash
+# @sacloud-once
+
+BLOGTITLE=nullpopopo
+BLOGADMIN=nullpopopo
+BLOGPW=Bl0Gp@SsW0rD
+ADMINMAIL=root@localhost.localdomain
+
+mkdir -p /home/vhosts/${HOSTNAME}
+VHDIR=/home/vhosts/${HOSTNAME}/public_html
+NUM=$(ls /home/vhosts/ | wc -l)
+DBNAME=$(printf "wpdb%04d" ${NUM})
+DBUSER=$(printf "user%04d" ${NUM})
+WP=/usr/local/bin/wp
+DOWNLOADURL=https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+PARAMDIR=${HOME}/.mysql
+PARAMFILE=${PARAMDIR}/MySQLPARAM
+mkdir -p ${PARAMDIR}
+echo "user root $(cat /dev/urandom | tr -dc '[:alnum:]' | head -c 8)" > ${PARAMFILE}
+echo "DBPARAM ${DBNAME} ${DBUSER} $(cat /dev/urandom | tr -dc '[:alnum:]' | head -c 8)" >> ${PARAMFILE}
+ROOTPW=$(grep ^user ${PARAMFILE} | awk '{print $NF}')
+DBUSERPW=$(grep ^"DBPARAM ${DBNAME} ${DBUSER}" ${PARAMFILE} | awk '{print $NF}')
+
+cp -p /etc/selinux/config{,.orig}
+sed -i 's/enforcing$/disabled/' /etc/selinux/config
+
+if [ ! -f /etc/yum.repos.d/epel.repo ];
+then
+  yum -y install epel-release
+  mkdir /etc/yum.repos.d/BACKUP/
+  cp -p /etc/yum.repos.d/epel.repo{,.orig}
+  sed -i "s/enabled=1/enabled=0/" /etc/yum.repos.d/epel.repo
+fi
+
+if [ ! -f /etc/yum.repos.d/remi.repo ];
+then
+  yum -y install http://remi.kazukioishi.net/enterprise/remi-release-7.rpm
+fi
+
+yum -y install bind-utils telnet wget nkf unzip git dstat mailx
+yum -y --enablerepo=epel install htop
+
+cp -p /etc/ssh/sshd_config{,.orig}
+sed -i 's/#UseDNS yes/UseDNS no/' /etc/ssh/sshd_config
+sed -i 's/GSSAPIAuthentication yes/GSSAPIAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/GSSAPICleanupCredentials yes/GSSAPICleanupCredentials no/' /etc/ssh/sshd_config
+sed -i 's/#GSSAPIStrictAcceptorCheck yes/GSSAPIStrictAcceptorCheck no/' /etc/ssh/sshd_config
+sed -i 's/#GSSAPIKeyExchange no/GSSAPIKeyExchange no/' /etc/ssh/sshd_config
+systemctl restart sshd.service
+
+yum -y update
+
+cp -p /etc/postfix/main.cf{,.orig}
+sed -i "s/#myhostname = virtual.domain.tld/#myhostname = virtual.domain.tld\nmyhostname = ${HOSTNAME}/" /etc/postfix/main.cf
+sed -i "s/#inet_interfaces = all/inet_interfaces = all/" /etc/postfix/main.cf
+sed -i "s/inet_interfaces = localhost/#inet_interfaces = localhost/" /etc/postfix/main.cf
+sed -i 's/#myorigin = $myhostname/myorigin = $myhostname/' /etc/postfix/main.cf
+sed -i "s/#home_mailbox = Maildir/home_mailbox = Maildir/" /etc/postfix/main.cf
+systemctl restart postfix.service
+
+if [ 3 = $(systemctl status firewalld.service > /dev/null ; echo $?) ];
+then
+  systemctl start firewalld.service
+fi
+systemctl enable firewalld.service
+firewall-cmd --zone=public --add-service http
+firewall-cmd --zone=public --add-service http --permanent
+
+yum -y install http://dev.mysql.com/get/mysql-community-release-el7-5.noarch.rpm
+yum -y install mysql-community-server
+systemctl start mysqld.service
+systemctl enable  mysqld.service
+mysql -u root -e "SET PASSWORD FOR root@localhost=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@\"${HOSTNAME}\"=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@127.0.0.1=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@\"::1\"=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "delete from mysql.user where user='';"
+mysql -u root -p${ROOTPW} -e 'FLUSH PRIVILEGES;'
+
+yum -y --enablerepo=remi install gd-last fontconfig fontpackages-filesystem jbigkit-libs libX11 libX11-common libXau libXpm libjpeg-turbo libpng libtiff libvpx libxcb
+yum -y --enablerepo=epel --enablerepo=remi-php56 install php-cli php-pdo php-pear php-pecl-igbinary php-pecl-jsonc php-pecl-msgpack php-process php-common php-fpm php-gd php-intl php-mbstring php-mcrypt php-mysqlnd php-opcache php-pecl-apcu php-pecl-geoip php-pecl-memcache php-pecl-memcached php-pecl-zip php-xml GeoIP libevent libmcrypt libmemcached libtool-ltdl libxslt t1lib libicu
+
+cp -p /etc/php-fpm.d/www.conf{,.orig}
+sed -i 's/^user\ \= apache/\;user\ \= apache\nuser\ \=\ nginx/' /etc/php-fpm.d/www.conf
+sed -i 's/^group\ \= apache/\;group\ \= apache\ngroup\ \=\ nginx/' /etc/php-fpm.d/www.conf
+cp -p /etc/php.ini{,.orig}
+sed -i 's/\;date.timezone\ \=/\;##--@--##date.timezone\ \=\ndate.timezone\ \=\ Asia\/Tokyo/' /etc/php.ini
+sed -i 's/memory_limit = 128M/memory_limit = 256M/' /etc/php.ini
+sed -i 's/post_max_size = 8M/post_max_size = 32M/' /etc/php.ini
+sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 128M/' /etc/php.ini 
+mkdir /etc/php.d/BACKUP
+cp -p /etc/php.d/40-apcu.ini /etc/php.d/BACKUP/40-apcu.ini.orig
+sed -i 's/;apc.shm_size=32M/apc.shm_size=128M/' /etc/php.d/40-apcu.ini
+cp -p /etc/php.d/10-opcache.ini /etc/php.d/BACKUP/10-opcache.ini.orig
+sed -i 's/;opcache.revalidate_freq=2/opcache.revalidate_freq=60/' /etc/php.d/10-opcache.ini
+
+yum -y install http://nginx.org/packages/centos/7/noarch/RPMS/nginx-release-centos-7-0.el7.ngx.noarch.rpm
+cp -p /etc/yum.repos.d/nginx.repo{,.orig}
+sed -i 's/centos/mainline\/centos/' /etc/yum.repos.d/nginx.repo
+yum -y install nginx
+
+chgrp nginx /var/lib/php/{session,wsdlcache}
+
+cp -p /etc/nginx/nginx.conf{,.orig}
+cat << _EOL_ | tee /etc/nginx/nginx.conf
+user  nginx;
+worker_processes  $(cat /proc/cpuinfo | grep processor | wc -l);
+
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
+
+worker_rlimit_nofile  2560;
+events {
+    worker_connections  1536;
+}
+
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    #log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+    #                  '\$status \$body_bytes_sent "\$http_referer" '
+    #                  '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                      '\$status \$body_bytes_sent "\$http_referer" '
+                      '"\$http_user_agent"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile        on;
+    #tcp_nopush     on;
+    tcp_nopush      on;
+    tcp_nodelay     on;
+    log_not_found   off;
+    server_tokens   off;
+    gzip            on;
+    gzip_http_version 1.0;
+        gzip_types text/plain
+        text/xml
+        text/css
+        text/php
+        application/xml
+        application/xhtml+xml
+        application/rss+xml
+        application/atom_xml
+        application/javascript
+        application/x-javascript 
+        application/x-httpd-php; 
+        gzip_disable "MSIE [1-6]\.";
+    gzip_disable "Mozilla/4"; 
+    gzip_comp_level 9;
+    gzip_vary on;
+    gzip_static     on;
+    gzip_min_length 1024;
+    gzip_buffers 4 8k;
+    limit_conn_zone   \$binary_remote_addr  zone=addr:10m;
+
+
+    keepalive_timeout  65;
+
+    #gzip  on;
+
+    include /etc/nginx/conf.d/*.conf;
+}
+_EOL_
+
+VHOSTS=${HOSTNAME}
+A=$(echo ${VHOSTS} | sed -e 's/ /,/g')
+echo "mkdir -p /home/logs/$A /home/vhosts/$A/{src,public_html}" | sh
+chown -R nginx:root /home/vhosts
+chmod -R g+w /home/vhosts
+
+mkdir /etc/nginx/conf.d/BACKUP/
+mv /etc/nginx/conf.d/*.conf /etc/nginx/conf.d/BACKUP/
+for A in ${VHOSTS}
+do
+cat << _EOL_ | tee /etc/nginx/conf.d/${A}.conf
+server {
+    listen       80;
+    server_name  ${A};
+    access_log  /home/logs/${A}/access_log  main;
+    error_log  /home/logs/${A}/error_log;
+
+    location / {
+        root   /home/vhosts/${A}/public_html;
+        index  index.php index.html index.htm;
+
+        ## WordPressのパーマリンク設定をカスタム構造に ##
+        if (-f \$request_filename) {
+                expires 30d;
+        }
+        if (!-e \$request_filename) {
+                rewrite ^.+?(\$/wp-.*) \$1 last;
+                rewrite ^.+?(/.*\.php)\$ \$1 last;
+                rewrite ^ /index.php last;
+        }
+        ## ここまで ##
+    }
+
+    location ~ \.php\$ {
+        root   /home/vhosts/${A}/public_html;
+        fastcgi_pass   127.0.0.1:9000;
+        fastcgi_index  index.php;
+        fastcgi_param  SCRIPT_FILENAME  \$document_root/\$fastcgi_script_name;
+        client_max_body_size 256M;
+        include        fastcgi_params;
+    }
+
+    error_page  404              /404.html;
+    location = /404.html {
+        root   /usr/share/nginx/html;
+    }
+
+    error_page   500 502 503 504  /50x.html;
+    location = /50x.html {
+        root   /usr/share/nginx/html;
+    }
+}
+
+_EOL_
+
+done
+
+curl -o ${WP} ${DOWNLOADURL}
+chmod 755 ${WP}
+
+yum -y --enablerepo=remi install memcached
+mkdir -p /etc/sysconfig/BACKUP/
+cp -p /etc/sysconfig/memcached /etc/sysconfig/BACKUP/memcached.orig
+sed -i 's/MAXCONN="1024"/MAXCONN="1024"/' /etc/sysconfig/memcached
+sed -i 's/CACHESIZE="64"/CACHESIZE="384"/' /etc/sysconfig/memcached
+systemctl start memcached.service
+systemctl enable memcached.service
+
+systemctl start php-fpm.service
+systemctl enable php-fpm.service
+
+systemctl start nginx.service
+systemctl enable nginx.service
+
+mkdir -p /etc/logrotate.d/BACKUP/
+cp -p /etc/logrotate.d/nginx /etc/logrotate.d/BACKUP/nginx.orig
+cat << _EOL_ | tee /etc/logrotate.d/nginx
+/var/log/nginx/*.log /home/logs/*/access_log /home/logs/*/error_log {
+        daily
+        missingok
+        rotate 52
+        compress
+        delaycompress
+        notifempty
+        create 640 nginx root
+        sharedscripts
+        postrotate
+                [ -f /var/run/nginx.pid ] && kill -USR1 \`cat /var/run/nginx.pid\`
+        endscript
+}
+_EOL_
+
+mysql -u root -p${ROOTPW} -e "CREATE DATABASE ${DBNAME} DEFAULT CHARACTER SET utf8;"
+mysql -u root -p${ROOTPW} -e "GRANT ALL PRIVILEGES ON ${DBNAME}.* TO ${DBUSER}@localhost IDENTIFIED BY \"${DBUSERPW}\";"
+mysql -u root -p${ROOTPW} -e "FLUSH PRIVILEGES;"
+su - nginx --shell=/bin/bash --command="${WP} core download --locale=ja --path=${VHDIR}/"
+su - nginx --shell=/bin/bash --command="${WP} core config --dbname=${DBNAME} --dbuser=${DBUSER} --dbpass=${DBUSERPW} --path=${VHDIR}/  --extra-php <<PHP
+define('FS_METHOD', 'direct');
+PHP"
+su - nginx --shell=/bin/bash --command="${WP} core install --url=${HOSTNAME} --title=${BLOGTITLE} --admin_user=${BLOGADMIN} --admin_password=${BLOGPW} --admin_email=${ADMINMAIL} --path=${VHDIR}/"
+
+systemctl reboot
