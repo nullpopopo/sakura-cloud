@@ -1,0 +1,38 @@
+#!/bin/bash
+# @sacloud-once
+# @sacloud-desc サーバ作成後、WebブラウザでサーバのIPアドレスにアクセスしてください。
+# @sacloud-desc http://サーバのIPアドレス/
+# @sacloud-desc (このスクリプトは、CentOS6.XもしくはScientific Linux6.Xでのみ動作します)
+# @sacloud-desc DrupalダウンロードURL 入力例: http://ftp.drupal.org/files/projects/drupal-7.34.tar.gz
+# @sacloud-desc Drupal日本語化パッケージダウンロードURL 入力例: http://ftp.drupal.org/files/translations/7.x/drupal/drupal-7.34.ja.po
+# @sacloud-desc Drupal本体最新版は https://www.drupal.org/download で確認してください。
+# @sacloud-desc Drupal日本語化パッケージ最新版は http://ftp.drupal.org/files/translations/7.x/drupal/ で確認してください。
+# @sacloud-text required shellarg maxlen=100 durl "DrupalダウンロードURL"
+# @sacloud-text required shellarg maxlen=100 jurl "Drupal日本語化パッケージダウンロードURL"
+# @sacloud-password required shellarg maxlen=100 rootpw "MySQLのパスワード"
+DURL=@@@durl@@@
+JURL=@@@jurl@@@
+ROOTPW=@@@rootpw@@@
+yum -y update
+yum -y install $(yum --disablerepo=epel --disablerepo=remi --disablerepo=rpmforge --disablerepo=rpmfusion-nonfree-updates --disablerepo=rpmfusion-free-updates list | grep ^php | awk '{print $1}' | xargs) httpd mysql-server
+rm -fr /var/www/html
+mkdir src
+cd src/
+wget ${DURL}
+tar xzf $(basename ${DURL})
+mv $(ls -l | grep ^d | awk '{print $NF}') /var/www/html
+wget ${JURL}
+mv $(basename ${JURL}) /var/www/html/profiles/standard/translations/
+chown -R apache:root /var/www/html
+chmod g+w /var/www/html
+service mysqld start
+chkconfig mysqld on
+mysql -u root -e "SET PASSWORD FOR root@localhost=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@127.0.0.1=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@\"::1\"=PASSWORD('${ROOTPW}');"
+mysql -u root -p${ROOTPW} -e "delete from mysql.user where user='';"
+mysql -u root -p${ROOTPW} -e 'FLUSH PRIVILEGES;'
+mysql -u root -p${ROOTPW} -e 'CREATE DATABASE drupal DEFAULT CHARACTER SET utf8;'
+service httpd start
+chkconfig httpd on
+reboot
