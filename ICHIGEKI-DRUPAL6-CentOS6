@@ -25,6 +25,8 @@ tar xzf $(basename ${JURL})
 mv $(ls -l | grep ^d | awk '{print $NF}') /var/www/html/sites/all/modules/
 chown -R apache:root /var/www/html
 chmod g+w /var/www/html
+NUM=$(cat -n /etc/httpd/conf/httpd.conf | egrep -A 1000 '(<Directory[[:space:]]*"/var/www/html">)' | egrep -m 1 -B 1000 '(</Directory>)' | egrep "AllowOverride[[:space:]]*None" | awk '{print $1}')
+sed -i "${NUM}s/None$/All/" /etc/httpd/conf/httpd.conf
 service mysqld start
 chkconfig mysqld on
 mysql -u root -e "SET PASSWORD FOR root@localhost=PASSWORD('${ROOTPW}');"
