@@ -12,9 +12,7 @@ ROOTPW=@@@rootpw@@@
 
 ## eth0をhosts登録
 cp -p /etc/hosts{,.orig}
-cat << _EOL_ | tee -a /etc/hosts
-$(ip a | egrep "inet " | egrep -v 127.0.0.1 | awk '{print $2}' | sed -e "s/\\/[0-9]*//g;s/$/\t\t${HOSTNAME}/g")
-_EOL_
+echo $(ip a show dev eth0 | egrep '(inet )' | awk '{print $2}' | sed -e 's/\/[0-9]*//g') ${HOSTNAME} | awk '{print $1"\t""\t"$2}' | tee -a /etc/hosts
 
 ## ドキュメントルート作成とMovable Typeダウンロード
 mkdir -p /var/www
@@ -48,8 +46,10 @@ mysql -u root -e "SET PASSWORD FOR root@localhost=PASSWORD('${ROOTPW}');"
 mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@\"${HOSTNAME}\"=PASSWORD('${ROOTPW}');"
 mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@127.0.0.1=PASSWORD('${ROOTPW}');"
 mysql -u root -p${ROOTPW} -e "SET PASSWORD FOR root@\"::1\"=PASSWORD('${ROOTPW}');"
-mysql -u root -p${ROOTPW} -e "delete from mysql.user where user='';"
+mysql -u root -p${ROOTPW} -e "delete from mysql.user where password='';"
 mysql -u root -p${ROOTPW} -e 'FLUSH PRIVILEGES;'
+
+## database「mt」作成
 mysql -u root -p${ROOTPW} -e "create database mt;"
 
 
@@ -69,7 +69,7 @@ server {
     server_name  ${HOSTNAME};
     location / {
         root   /var/www/html;
-        index  index.cgi index.pl index.html index.htm;
+        index  index.html index.htm index.cgi index.pl;
     }
     error_page   500 502 503 504  /50x.html;
     location = /50x.html {
@@ -201,14 +201,12 @@ chmod 700 /usr/bin/fastcgi-wrapper.pl
 cat << _EOL_ | tee /etc/rc.d/init.d/perl-fastcgi
 #!/bin/bash
 #
-# nginx – this script starts and stops the nginx daemon
+# perl-fastcgi – this script starts and stops the perl-fastcgi daemon
 #
 # chkconfig: - 85 15
-# description: Nginx is an HTTP(S) server, HTTP(S) reverse \\
-# proxy and IMAP/POP3 proxy server
-# processname: nginx
-# config: /opt/nginx/conf/nginx.conf
-# pidfile: /opt/nginx/logs/nginx.pid
+# description: 
+# config:
+# pidfile: 
 
 # Source function library.
 . /etc/rc.d/init.d/functions
