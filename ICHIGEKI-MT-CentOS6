@@ -15,14 +15,16 @@ cp -p /etc/hosts{,.orig}
 echo $(ip a show dev eth0 | egrep '(inet )' | awk '{print $2}' | sed -e 's/\/[0-9]*//g') ${HOSTNAME} | awk '{print $1"\t""\t"$2}' | tee -a /etc/hosts
 
 ## ドキュメントルート作成とMovable Typeダウンロード
+HOME=/root
+export HOME
 mkdir -p /var/www
-mkdir ${HOME}/src
+mkdir -p ${HOME}/src
 cd ${HOME}/src
 FILENAME=$(basename ${DURL} | awk 'BEGIN {FS="?"} {print $1}')
 curl -o ${FILENAME} ${DURL}
 unzip ${FILENAME}
 mv $(ls | grep -v zip$) /var/www/html
-cd
+cd ${HOME}
 
 ## iptables設定
 service iptables stop
