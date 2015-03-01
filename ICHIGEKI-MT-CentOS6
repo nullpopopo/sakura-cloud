@@ -18,9 +18,9 @@ echo $(ip a show dev eth0 | egrep '(inet )' | awk '{print $2}' | sed -e 's/\/[0-
 mkdir -p /var/www
 mkdir ${HOME}/src
 cd ${HOME}/src
-wget "${DURL}"
-mv $(ls | grep ^MT) $(ls | grep ^MT | awk 'BEGIN {FS="?"}{print $1}')
-unzip $(ls | grep ^MT-[0-9]_[0-9]_[0-9].zip)
+FILENAME=$(basename ${DURL})
+curl -o ${FILENAME} ${DURL}
+unzip ${FILENAME}
 mv $(ls | grep -v zip$) /var/www/html
 cd
 
