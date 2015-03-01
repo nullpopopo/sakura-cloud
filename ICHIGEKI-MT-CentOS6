@@ -18,7 +18,7 @@ echo $(ip a show dev eth0 | egrep '(inet )' | awk '{print $2}' | sed -e 's/\/[0-
 mkdir -p /var/www
 mkdir ${HOME}/src
 cd ${HOME}/src
-FILENAME=$(basename ${URI} | awk 'BEGIN {FS="?"} {print $1}')
+FILENAME=$(basename ${DURL} | awk 'BEGIN {FS="?"} {print $1}')
 curl -o ${FILENAME} ${DURL}
 unzip ${FILENAME}
 mv $(ls | grep -v zip$) /var/www/html
