@@ -97,206 +97,34 @@ server {
 _EOL_
 
 ## fastcgi-wrapper.pl 作成
-cat << _EOL_ | tee /usr/bin/fastcgi-wrapper.pl
-#!/usr/bin/perl
-
-use FCGI;
-use Socket;
-use POSIX qw(setsid);
-
-require 'syscall.ph';
-
-&daemonize;
-
-#this keeps the program alive or something after exec'ing perl scripts
-END() { } BEGIN() { }
-*CORE::GLOBAL::exit = sub { die "fakeexit\nrc=".shift()."\n"; }; 
-eval q{exit}; 
-if (\$@) { 
-    exit unless \$@ =~ /^fakeexit/; 
-};
-
-&main;
-
-sub daemonize() {
-    chdir '/'                 or die "Can't chdir to /: \$!";
-    defined(my \$pid = fork)   or die "Can't fork: \$!";
-    exit if \$pid;
-    setsid                    or die "Can't start a new session: \$!";
-    umask 0;
-}
-
-sub main {
-        \$socket = FCGI::OpenSocket( "127.0.0.1:8999", 10 ); #use IP sockets
-        \$request = FCGI::Request( \*STDIN, \*STDOUT, \*STDERR, \%req_params, \$socket );
-        if (\$request) { request_loop()};
-            FCGI::CloseSocket( \$socket );
-}
-
-sub request_loop {
-        while( \$request->Accept() >= 0 ) {
-
-           #processing any STDIN input from WebServer (for CGI-POST actions)
-           \$stdin_passthrough ='';
-           \$req_len = 0 + \$req_params{'CONTENT_LENGTH'};
-           if ((\$req_params{'REQUEST_METHOD'} eq 'POST') && (\$req_len != 0) ){ 
-                my \$bytes_read = 0;
-                while (\$bytes_read < \$req_len) {
-                        my \$data = '';
-                        my \$bytes = read(STDIN, \$data, (\$req_len - \$bytes_read));
-                        last if (\$bytes == 0 || !defined(\$bytes));
-                        \$stdin_passthrough .= \$data;
-                        \$bytes_read += \$bytes;
-                }
-            }
-
-            #running the cgi app
-            if ( (-x \$req_params{SCRIPT_FILENAME}) &&  #can I execute this?
-                 (-s \$req_params{SCRIPT_FILENAME}) &&  #Is this file empty?
-                 (-r \$req_params{SCRIPT_FILENAME})     #can I read this file?
-            ){
-        pipe(CHILD_RD, PARENT_WR);
-        my \$pid = open(KID_TO_READ, "-|");
-        unless(defined(\$pid)) {
-            print("Content-type: text/plain\r\n\r\n");
-                        print "Error: CGI app returned no output - ";
-                        print "Executing \$req_params{SCRIPT_FILENAME} failed !\n";
-            next;
-        }
-        if (\$pid > 0) {
-            close(CHILD_RD);
-            print PARENT_WR \$stdin_passthrough;
-            close(PARENT_WR);
-
-            while(my \$s = <KID_TO_READ>) { print \$s; }
-            close KID_TO_READ;
-            waitpid(\$pid, 0);
-        } else {
-                    foreach \$key ( keys %req_params){
-                       \$ENV{\$key} = \$req_params{\$key};
-                    }
-                    # cd to the script's local directory
-                    if (\$req_params{SCRIPT_FILENAME} =~ /^(.*)\/[^\/]+\$/) {
-                            chdir \$1;
-                    }
-
-            close(PARENT_WR);
-            close(STDIN);
-            #fcntl(CHILD_RD, F_DUPFD, 0);
-            syscall(&SYS_dup2, fileno(CHILD_RD), 0);
-            #open(STDIN, "<&CHILD_RD");
-            exec(\$req_params{SCRIPT_FILENAME});
-            die("exec failed");
-        }
-            } 
-            else {
-                print("Content-type: text/plain\r\n\r\n");
-                print "Error: No such CGI app - \$req_params{SCRIPT_FILENAME} may not ";
-                print "exist or is not executable by this process.\n";
-            }
-
-        }
-}
-_EOL_
+curl -L -o /usr/bin/fastcgi-wrapper.pl http://www.linode.com/docs/assets/642-fastcgi-wrapper.sh
 chmod 700 /usr/bin/fastcgi-wrapper.pl
 
-cat << _EOL_ | tee /etc/rc.d/init.d/perl-fastcgi
-#!/bin/bash
-#
-# perl-fastcgi – this script starts and stops the perl-fastcgi daemon
-#
-# chkconfig: - 85 15
-# description: 
-# config:
-# pidfile: 
+## perl-fastcgi initスクリプト作成
+PERLFCGIDAEMON=/etc/rc.d/init.d/perl-fastcgi
+curl -L -o ${PERLFCGIDAEMON} http://www.linode.com/docs/assets/641-init-rpm.sh
+sed -i '77a\rh_status_q() {\
+rh_status >/dev/null 2>&1 \
+}\
+'  ${PERLFCGIDAEMON}
+sed -i '/^#[[:space:]][ndpc][gerio]*/d' ${PERLFCGIDAEMON}
+sed -i '2s/^#$/# perl-fastcgi/' ${PERLFCGIDAEMON}
+sed -i '3s/^#$/# description: this script starts and stops the perl-fastcgi daemon/' ${PERLFCGIDAEMON}
+sed -i "3a # chkconfig: - 85 15" ${PERLFCGIDAEMON}
+sed -i s/^nginx=[\"\/[:alnum:]]*/perlfastcgi='"\/usr\/bin\/fastcgi-wrapper.pl"'/ ${PERLFCGIDAEMON}
+sed -i 's/prog=\$(basename \$nginx)/prog=\$\(basename perl\)/' ${PERLFCGIDAEMON}
+sed -i s/^NGINX_[[:alnum:]_=\"\\./]*// ${PERLFCGIDAEMON}
+sed -i 's/lockfile=\/var\/lock\/subsys\/nginx/lockfile\=\/var\/lock\/subsys\/perl-fastcgi/' ${PERLFCGIDAEMON}
+sed -i 's/\[ -x $nginx ] || exit [0-9]/[ -x $perlfastcgi ] || exit 5/' ${PERLFCGIDAEMON}
+sed -i 's/\[ -f $NGINX_CONF_FILE ] || exit [0-9]//' ${PERLFCGIDAEMON}
+sed -i 's/daemon $nginx -c $NGINX_CONF_FILE/daemon $perlfastcgi/' ${PERLFCGIDAEMON}
+sed -i 's/configtest || return $?//g' ${PERLFCGIDAEMON}
+sed -i 's/killproc $nginx -HUP/killproc $prog -HUP/' ${PERLFCGIDAEMON}
+sed -i '66,69d' ${PERLFCGIDAEMON}
+sed -i 's/restart|configtest/restart/' ${PERLFCGIDAEMON}
+sed -i 's/echo $"Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload|configtest}"/echo "Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"/' ${PERLFCGIDAEMON}
 
-# Source function library.
-. /etc/rc.d/init.d/functions
-
-# Source networking configuration.
-. /etc/sysconfig/network
-
-# Check that networking is up.
-[ "\$NETWORKING" = "no" ] && exit 0
-
-perlfastcgi="/usr/bin/fastcgi-wrapper.pl"
-prog=\$(basename perl)
-
-lockfile=/var/lock/subsys/perl-fastcgi
-
-start() {
-    [ -x \$perlfastcgi ] || exit 5
-    echo -n \$"Starting \$prog: "
-    daemon \$perlfastcgi
-    retval=\$?
-    echo
-    [ \$retval -eq 0 ] && touch \$lockfile
-    return \$retval
-}
-
-stop() {
-    echo -n \$"Stopping \$prog: "
-    killproc \$prog -QUIT
-    retval=\$?
-    echo
-    [ \$retval -eq 0 ] && rm -f \$lockfile
-    return \$retval
-}
-
-restart() {
-    stop
-    start
-}
-
-reload() {
-    echo -n \$”Reloading \$prog: ”
-    killproc \$nginx -HUP
-    RETVAL=\$?
-    echo
-}
-
-force_reload() {
-    restart
-}
-rh_status() {
-    status \$prog
-}
-
-rh_status_q() {
-    rh_status >/dev/null 2>&1
-}
-
-case "\$1" in
-    start)
-        rh_status_q && exit 0
-        \$1
-        ;;
-    stop)
-        rh_status_q || exit 0
-        \$1
-        ;;
-    restart)
-        \$1
-        ;;
-    reload)
-        rh_status_q || exit 7
-        \$1
-        ;;
-    force-reload)
-        force_reload
-        ;;
-    status)
-        rh_status
-        ;;
-    condrestart|try-restart)
-        rh_status_q || exit 0
-        ;;
-    *)
-        echo \$"Usage: \$0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
-        exit 2
-    esac
-_EOL_
-chmod 700 /etc/rc.d/init.d/perl-fastcgi
+chmod 700 ${PERLFCGIDAEMON}
 chkconfig --add perl-fastcgi
 chkconfig perl-fastcgi on
 service perl-fastcgi start
