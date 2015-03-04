@@ -119,7 +119,7 @@ sed -i 's/\[ -x $nginx ] || exit [0-9]/[ -x $perlfastcgi ] || exit 5/' ${PERLFCG
 sed -i 's/\[ -f $NGINX_CONF_FILE ] || exit [0-9]//' ${PERLFCGIDAEMON}
 sed -i 's/daemon $nginx -c $NGINX_CONF_FILE/daemon $perlfastcgi/' ${PERLFCGIDAEMON}
 sed -i 's/configtest || return $?//g' ${PERLFCGIDAEMON}
-sed -i 's/killproc $nginx -HUP/killproc $prog -HUP/' ${PERLFCGIDAEMON}
+sed -i 's/killproc $nginx -HUP/stop ";" start/' ${PERLFCGIDAEMON}
 sed -i '66,69d' ${PERLFCGIDAEMON}
 sed -i 's/restart|configtest/restart/' ${PERLFCGIDAEMON}
 sed -i 's/echo $"Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload|configtest}"/echo "Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"/' ${PERLFCGIDAEMON}
