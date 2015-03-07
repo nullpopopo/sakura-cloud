@@ -116,7 +116,7 @@ sed -i 's/\[ -f $NGINX_CONF_FILE ] || exit [0-9]//' ${PERLFCGIDAEMON}
 sed -i 's/daemon $nginx -c $NGINX_CONF_FILE/daemon $perlfastcgi/' ${PERLFCGIDAEMON}
 sed -i 's/configtest || return $?//g' ${PERLFCGIDAEMON}
 sed -i 's/killproc $nginx -HUP/stop ; start/' ${PERLFCGIDAEMON}
-sed -i '66,69d' ${PERLFCGIDAEMON}
+sed -i '60,62d' ${PERLFCGIDAEMON}
 sed -i 's/restart|configtest/restart/' ${PERLFCGIDAEMON}
 sed -i "95s/|configtest//" ${PERLFCGIDAEMON}
 
