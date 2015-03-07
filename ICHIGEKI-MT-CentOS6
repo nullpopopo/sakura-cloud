@@ -103,10 +103,6 @@ chmod 700 /usr/bin/fastcgi-wrapper.pl
 ## perl-fastcgi initスクリプト作成
 PERLFCGIDAEMON=/etc/rc.d/init.d/perl-fastcgi
 curl -L -o ${PERLFCGIDAEMON} http://www.linode.com/docs/assets/641-init-rpm.sh
-sed -i '77a\rh_status_q() {\
-rh_status >/dev/null 2>&1 \
-}\
-'  ${PERLFCGIDAEMON}
 sed -i '/^#[[:space:]][ndpc][gerio]*/d' ${PERLFCGIDAEMON}
 sed -i '2s/^#$/# perl-fastcgi/' ${PERLFCGIDAEMON}
 sed -i '3s/^#$/# description: this script starts and stops the perl-fastcgi daemon/' ${PERLFCGIDAEMON}
@@ -122,7 +118,7 @@ sed -i 's/configtest || return $?//g' ${PERLFCGIDAEMON}
 sed -i 's/killproc $nginx -HUP/stop ; start/' ${PERLFCGIDAEMON}
 sed -i '60,62d' ${PERLFCGIDAEMON}
 sed -i 's/restart|configtest/restart/' ${PERLFCGIDAEMON}
-sed -i "99s/|configtest//" ${PERLFCGIDAEMON}
+sed -i "95s/|configtest//" ${PERLFCGIDAEMON}
 
 chmod 700 ${PERLFCGIDAEMON}
 chkconfig --add perl-fastcgi
