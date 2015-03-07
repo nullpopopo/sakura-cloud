@@ -122,7 +122,7 @@ sed -i 's/configtest || return $?//g' ${PERLFCGIDAEMON}
 sed -i 's/killproc $nginx -HUP/stop ; start/' ${PERLFCGIDAEMON}
 sed -i '60,62d' ${PERLFCGIDAEMON}
 sed -i 's/restart|configtest/restart/' ${PERLFCGIDAEMON}
-sed -i 's/echo $"Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload|configtest}"/echo "Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"/' ${PERLFCGIDAEMON}
+sed -i "99s/|configtest//" ${PERLFCGIDAEMON}
 
 chmod 700 ${PERLFCGIDAEMON}
 chkconfig --add perl-fastcgi
