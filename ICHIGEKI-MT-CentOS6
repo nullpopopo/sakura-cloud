@@ -63,6 +63,8 @@ yum -y install perl-DBI perl-DBD-MySQL perl-Archive-Zip perl-XML-SAX perl-XML-Li
 yum -y --enablerepo=epel install perl-FCGI perl-Crypt-DSA
 yum -y --enablerepo=rpmforge install perl-XML-SAX-Expat perl-Imager
 yum -y install nginx
+cp -p /etc/nginx/nginx.conf{,.orig}
+sed -i "s/worker_processes[[:space:]]\+[0-9]\+/worker_processes $(cat /proc/cpuinfo | grep processor | wc -l)/g" /etc/nginx/nginx.conf
 mkdir -p /etc/nginx/conf.d/BACKUP
 mv /etc/nginx/conf.d/*.conf /etc/nginx/conf.d/BACKUP/
 cat << _EOL_ | tee /etc/nginx/conf.d/000_MT.conf
